@@ -36,5 +36,5 @@ This is NOT just a vibe — it's data with style.
 
 1. Clone the repo
 ```bash
-git clone https://github.com/yourusername/MotionWitch.git
+git clone https://github.com/shash-wat/MotionWitch.git
 cd MotionWitch
