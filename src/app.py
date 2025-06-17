@@ -8,11 +8,18 @@ def load_video(video_path):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Could not open video file: {video_path}")
-    return cap
+    else:
+        ret, frame = cap.read()
+        if not ret:
+            cap.release()
+            raise ValueError(
+                f"Could not read frame from video file: {video_path}")
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return frame_rgb
 
 
 def preprocess_frame(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     return blurred
 
@@ -20,7 +27,7 @@ def preprocess_frame(frame):
 def get_thresholded_image(blurred_frame, method='adaptive'):
     if method == 'adaptive':
         thresh = cv2.adaptiveThreshold(
-            blurred_frame, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+            blurred_frame, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 11, 2)
     elif method == 'otsu':
         _, thresh = cv2.threshold(
             blurred_frame, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -33,7 +40,7 @@ def invert_image(image):
     return cv2.bitwise_not(image)
 
 
-def find_contours(thresh_image, min_area=500, max_area=3000):
+def find_contours(thresh_image, min_area=500, max_area=5000):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     clean_thresh = cv2.morphologyEx(thresh_image, cv2.MORPH_OPEN, kernel)
     contours, _ = cv2.findContours(
@@ -115,10 +122,10 @@ def draw_rectangles(
 def apply_partial_effects(
     frame,
     contours,
-    effect_ratio=0.3,                 # Percentage of rectangles to apply the effect on
-    effect_type="invert",             # "invert", "blur", etc.
-    overlay=True,                     # Apply gray transparent overlay or not
-    overlay_alpha=0.1,                # Transparency level (0 to 1)
+    effect_ratio=0.3,
+    effect_type="invert",
+    overlay=True,
+    overlay_alpha=0.1,
     min_area=500,
     max_area=5000,
     max_width=100,
@@ -138,14 +145,17 @@ def apply_partial_effects(
 
     # Filter valid contours
     valid_contours = []
-    for contour in contours:
+    valid_indices = []
+    for idx, contour in enumerate(contours):
         area = cv2.contourArea(contour)
         if min_area < area < max_area:
             valid_contours.append(contour)
+            valid_indices.append(idx)
 
-    # Randomly select subset for effect
+    # Randomly select subset of indices for effect
     effect_count = max(1, int(effect_ratio * len(valid_contours)))
-    effect_contours = random.sample(valid_contours, effect_count)
+    selected_indices = set(random.sample(
+        range(len(valid_contours)), effect_count))
 
     for i, contour in enumerate(valid_contours):
         x, y, w, h = cv2.boundingRect(contour)
@@ -159,7 +169,8 @@ def apply_partial_effects(
 
         roi = frame_copy[y:y + h, x:x + w]
 
-        if contour in effect_contours:
+        # Apply effect only to selected contours
+        if i in selected_indices:
             if effect_type == "invert":
                 modified_roi = cv2.bitwise_not(roi)
             elif effect_type == "blur":
@@ -168,7 +179,7 @@ def apply_partial_effects(
                 tint_color = np.full_like(roi, (0, 100, 255))
                 modified_roi = cv2.addWeighted(roi, 0.7, tint_color, 0.3, 0)
             else:
-                modified_roi = roi  # Fallback to original if unknown
+                modified_roi = roi
             frame_copy[y:y + h, x:x + w] = modified_roi
 
         # Draw rectangle
@@ -265,6 +276,32 @@ def analyze_video(video_path,
     df.to_csv(output_csv_path, index=False)
     print(f"Blob data saved to {output_csv_path}")
 
+
+def process_frame(frame):
+    blurred = preprocess_frame(frame)
+    thresh = get_thresholded_image(blurred)
+    inverted = invert_image(thresh)
+    contours = find_contours(inverted)
+    rects = draw_rectangles(frame.copy(), contours)
+    partial = apply_partial_effects(rects, contours)
+    final = draw_lines(partial, contours)
+    return final
+
+
+def process_video(video_path, output_path, fps=30):
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        processed_frame = process_frame(frame_rgb)
+        frames.append(processed_frame)
+
+    cap.release()
+    save_video(frames, output_path, fps=fps)
 
 # DO THE CONFIG STUFF LATER , CREATE A DICTIONARY FOR THE CONFIGS
 # AND THEN PASS IT TO THE FUNCTIONS IN THE RUN_PIPELINE FUNCTION
