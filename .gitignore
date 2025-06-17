@@ -198,5 +198,5 @@ venv/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-videos/
+Output_Videos/
 data/
